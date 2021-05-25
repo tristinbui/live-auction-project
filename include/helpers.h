@@ -10,6 +10,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <errno.h>
+#include "protocol.h"
+#include <pthread.h>
 
 
 
@@ -26,12 +28,14 @@ typedef struct s_users{
 } users_db;
 
 
-extern struct s_users users;
+extern users_db users;
 
 int open_listenfd(int port);
 void invalid_usage();
-void do_login(int connfd);
 int user_exists(char* loginbuf, size_t uname_size, user* user_l);
+void *client_thread();
+
+int do_login(int connfd, petr_header h);
 
 #define BUFFER_SIZE 1024
 #define SA struct sockaddr

@@ -12,8 +12,9 @@ setup:
 	mkdir -p bin
 
 server: setup $(DEPS)
-	$(CC) $(CFLAGS) $(LIBS) $(SSRC) lib/protocol.o -o bin/zbid_server
+	$(CC) $(CFLAGS)  $(SSRC) lib/protocol.o -o bin/zbid_server $(LIBS)
 	cp lib/zbid_client bin
+	cp lib/auctionroom bin
 	
 .PHONY: clean
 
