@@ -1,10 +1,113 @@
 #include "helpers.h"
 
 
-void *client_thread(void *vargp) {
+void *client_thread(void *client_fdp) {
+    int connfd = *(int *)client_fdp;
+    free(client_fdp); // on heap, free it
 
+    user *client_user = find_user(connfd);
 
+    petr_header h;
+    int flag = 1;
+    while (rd_msgheader(connfd, &h) == 0 && flag) {
+        switch (h.msg_type) {
+        case ANCREATE:
+            
+
+            break;
+        // case USRLIST:
+        //     sbuf_job *job = malloc(sizeof(job));
+        //     job->connfd = connfd;
+        //     job->msg_type = h.msg_type;
+        //     job->msg_len = h.msg_len;
+        //     sbuf_insert(&sbuf, job);
+        //     // connfd, message type
+        //     // sbuf_job
+
+        //     break;
+
+        case LOGOUT:
+            printf("got logout\n");
+            client_user->is_loggedin = 0;
+            h.msg_len = 0;
+            h.msg_type = 0;
+            
+            wr_msg(connfd, &h, OK);
+            flag = 0;
+            break;
+        
+        default:;
+            sbuf_job *job = malloc(sizeof(sbuf_job));
+            job->connfd = connfd;
+            job->msg_type = h.msg_type;
+            job->msg_len = h.msg_len;
+            sbuf_insert(&sbuf, job);
+            break;
+        }
+    }
+    close(connfd);
     return NULL;
+}
+
+void *job_thread() {
+    while (1){
+        sbuf_job *job = sbuf_remove(&sbuf);
+        // Question: Are the job and client threads supposed to be redundant?
+
+        switch(job->msg_type) {
+            case USRLIST:
+                printf("got userlist\n");
+                userlist_h(job->connfd);
+                break;
+                
+            case USRWINS:
+                
+
+            default:
+                break;
+        }
+
+        free(job);
+    }
+    return NULL;
+}
+
+void userlist_h(int connfd) {
+    char *uname_buf = calloc(1, sizeof(char));
+    printf("connfd: %d\n", connfd);
+    // TODO: mutex
+    P(&users.user_mutex);
+    users.read_count++;
+    if(users.read_count == 1) P(&users.user_sem);
+    V(&users.user_mutex);
+
+    
+    for(int i=0; i < users.num_users; ++i){
+        if(users.user_list[i]->connfd != connfd){
+            int size = strlen(uname_buf)+strlen(users.user_list[i]->uname)+2;
+            char *temp = realloc(uname_buf, size);
+            if(!temp) exit(1);
+            uname_buf = temp;
+            strcat(uname_buf, users.user_list[i]->uname);
+            strcat(uname_buf, "\n\0");
+        }
+    }
+
+    P(&users.user_mutex);
+    users.read_count--;
+    if(users.read_count == 0) V(&users.user_sem);
+    V(&users.user_mutex);
+    
+
+    petr_header h;
+    h.msg_type = USRLIST;
+    h.msg_len = strlen(uname_buf) == 0 ? 0 : strlen(uname_buf)+1;
+    // Question: why is this giving valgrind error?
+    printf("user: %s %d\n", uname_buf, (int) strlen(uname_buf));
+
+    wr_msg(connfd, &h, uname_buf);
+    
+    free(uname_buf);
 }
 
 
@@ -70,13 +173,13 @@ void invalid_usage() {
  * @return 0: if the user doesn't exist. 1: user exists & valid password.
  * -1: if the password is invalid.
  */
-int user_exists(char* loginbuf, size_t uname_size, user* user_l){
+int user_exists(char* loginbuf, size_t uname_size, user** user_l){
     char *passwd = loginbuf + uname_size + 1;
     printf("in user_exists: %d\n", users.num_users);
     for(int i=0; i < users.num_users; ++i) {
-        if(strncmp(user_l[i].uname, loginbuf, uname_size) == 0){
+        if(strncmp(user_l[i]->uname, loginbuf, uname_size) == 0){
             // check password
-            if(strcmp(user_l[i].password, passwd) == 0){
+            if(strcmp(user_l[i]->password, passwd) == 0){
                 // valid password
                 return 1;
             }
@@ -99,38 +202,40 @@ int user_exists(char* loginbuf, size_t uname_size, user* user_l){
  */
 int do_login(int connfd, petr_header h){
     char *loginbuf = malloc(sizeof(char) * h.msg_len);
-    user *users_l = users.user_list;
+    // user *users_l = users.user_list;
     read(connfd, loginbuf, h.msg_len);
     loginbuf[h.msg_len-1] = 0; // null terminate
-    char *passwd = strstr(loginbuf, "\r\n") + 1;
+    char *passwd = strstr(loginbuf, "\r\n") + 2;
     if (passwd != NULL) {
         int num_users = users.num_users;
         
         // TODO: check if user already exists & password is correct
-        size_t uname_size = strlen(loginbuf)-strlen(passwd)-1;
+        size_t uname_size = strlen(loginbuf)-strlen(passwd)-2;
 
         // result of user_exists
-        int exists_res = user_exists(loginbuf, uname_size, users_l);
+        int exists_res = user_exists(loginbuf, uname_size, users.user_list);
         if(exists_res == 0){
             // new user
-            users_l[num_users].password = calloc(1, sizeof(char) * strlen(passwd) + 1);
-            users_l[num_users].uname = calloc(1, sizeof(char) * uname_size + 1);
+            user* new_user = malloc(sizeof(user));
+            new_user->password = calloc(1, sizeof(char) * strlen(passwd) + 1);
+            new_user->uname = calloc(1, sizeof(char) * uname_size + 1);
 
-            strcpy(users_l[num_users].password, passwd);
-            strncpy(users_l[num_users].uname, loginbuf, uname_size);
-            users_l[num_users].is_loggedin = 1;
-            printf("%s\n", users_l[num_users].uname);
-            printf("%s\n", users_l[num_users].password);
+            strcpy(new_user->password, passwd);
+            strncpy(new_user->uname, loginbuf, uname_size);
+            new_user->is_loggedin = 1;
+            new_user->connfd = connfd;
+            printf("%s\n", new_user->uname);
+            // printf("%s\n", new_user->password);
 
             users.num_users++;
-            users.user_list = realloc(users.user_list, (users.num_users + 1) * sizeof(user));
-            users_l = users.user_list;
+            users.user_list[num_users] = new_user;
+            users.user_list = realloc(users.user_list, (users.num_users + 1) * sizeof(user*));
         }
         else if (exists_res == 1) {
             // TODO: check if the account is in use
             for(int i=0; i < num_users; ++i){
-                if(strncmp(users_l[i].uname, loginbuf, uname_size) == 0){
-                    if(users_l[i].is_loggedin == 1){
+                if(strncmp(users.user_list[i]->uname, loginbuf, uname_size) == 0){
+                    if(users.user_list[i]->is_loggedin == 1){
                         h.msg_type = EUSRLGDIN;
                         h.msg_len = 0;
                         wr_msg(connfd, &h, NULL);
@@ -139,7 +244,8 @@ int do_login(int connfd, petr_header h){
                     }
                     else {
                         // user exists, login
-                        users_l[i].is_loggedin = 1;
+                        users.user_list[i]->is_loggedin = 1;
+                        users.user_list[i]->connfd = connfd;
                     }
                 }
             }
@@ -163,4 +269,14 @@ int do_login(int connfd, petr_header h){
     }
     free(loginbuf);
     return -1;
+}
+
+user* find_user(int connfd){
+    for(int i=0; i < users.num_users; ++i){
+        if(connfd == users.user_list[i]->connfd){
+            return users.user_list[i];
+        }
+    }
+
+    return NULL;
 }
