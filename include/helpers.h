@@ -13,7 +13,7 @@
 #include "protocol.h"
 #include <pthread.h>
 #include "sbuf.h"
-
+#include "linkedList.h"
 
 
 typedef struct s_user {
@@ -29,28 +29,55 @@ typedef struct s_users{
     sem_t user_sem;
     sem_t user_mutex;
     int read_count;
-    
 } users_db;
+
+typedef struct s_auction {
+    int auction_id;
+    char* item_name;
+    int duration;
+    long bin_price;
+    long highest_bid;
+    int num_watchers;
+    user *creator;
+} auction_t;
+
+typedef struct s_auctions {
+    List_t *auction_list;
+    sem_t a_sem;
+    sem_t a_mutex;
+    int read_count;
+} auctions_db;
 
 typedef struct s_sbuf_job {
     int msg_type;
     int msg_len;
     int connfd;
+    char *msg_buf;
 } sbuf_job;
 
 extern users_db users;
-extern sbuf_t sbuf; 
+extern sbuf_t sbuf;
+extern auctions_db auctions;
+extern int AuctionID;
+extern sem_t AuctionID_mutex;
 
 int open_listenfd(int port);
 void invalid_usage();
 int user_exists(char* loginbuf, size_t uname_size, user** user_l);
 void userlist_h(int connfd);
+void ancreate_h(sbuf_job *job);
+void anlist_h(sbuf_job *job);
 
 void *client_thread();
 void *job_thread();
 
 int do_login(int connfd, petr_header h);
 user* find_user(int connfd);
+
+int compare_auction(void *l_auction, void *r_auction);
+sbuf_job *job_helper(int connfd, petr_header *h);
+void reader_lock(sem_t *mutex, sem_t *sem, int *readcnt);
+void reader_unlock(sem_t *mutex, sem_t *sem, int *readcnt);
 
 #define BUFFER_SIZE 1024
 #define SA struct sockaddr
