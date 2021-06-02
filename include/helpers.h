@@ -21,6 +21,7 @@ typedef struct s_user {
     char *password;
     int connfd;
     int is_loggedin;
+    List_t* watching_a;
 } user;
 
 typedef struct s_users{
@@ -39,6 +40,7 @@ typedef struct s_auction {
     long highest_bid;
     int num_watchers;
     user *creator;
+    List_t* watching_u;
 } auction_t;
 
 typedef struct s_auctions {
@@ -63,18 +65,26 @@ extern sem_t AuctionID_mutex;
 
 int open_listenfd(int port);
 void invalid_usage();
-int user_exists(char* loginbuf, size_t uname_size, user** user_l);
+
 void userlist_h(int connfd);
 void ancreate_h(sbuf_job *job);
 void anlist_h(sbuf_job *job);
+void anwatch_h(sbuf_job *job);
+void anleave_h(sbuf_job *job);
+
+void logout_h(sbuf_job *job);
 
 void *client_thread();
 void *job_thread();
+void *tick_thread();
 
 int do_login(int connfd, petr_header h);
-user* find_user(int connfd);
+user *find_user(int connfd);
+int user_exists(char* loginbuf, size_t uname_size, user** user_l);
+auction_t *find_auction(List_t *auction_list, int auction_id);
 
 int compare_auction(void *l_auction, void *r_auction);
+int compare_user(void *l_auction, void *r_auction);
 sbuf_job *job_helper(int connfd, petr_header *h);
 void reader_lock(sem_t *mutex, sem_t *sem, int *readcnt);
 void reader_unlock(sem_t *mutex, sem_t *sem, int *readcnt);

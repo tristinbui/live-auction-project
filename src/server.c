@@ -51,20 +51,22 @@ int main(int argc, char **argv) {
 
 
     // TODO: create tick thread
+    pthread_t tid;
+    int *tt = malloc(sizeof(int));
+    *tt = tick_time;
+    pthread_create(&tid, NULL, tick_thread, tt);
 
 
     // TODO: create signal handler for ctrl-c
 
     // create job threads
     for (int i = 0; i < num_jobthreads; i++){
-        pthread_t tid;  // what is tid for?
         pthread_create(&tid, NULL, job_thread, NULL);
     }
 
     sbuf_init(&sbuf, 1000);
 
 
-    // TODO: create auction list
     // next auction ID
     AuctionID = 1;
     sem_init(&(AuctionID_mutex), 0, 1);

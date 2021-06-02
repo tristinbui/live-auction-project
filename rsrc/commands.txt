@@ -1,0 +1,5 @@
+./bin/zbid_client user ics53 127.0.0.1 2000
+
+make >/dev/null && ./bin/zbid_server 2000 hi
+
+/createauction hi,2,2
