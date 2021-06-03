@@ -451,13 +451,24 @@ void usrsales_h(sbuf_job *job){
     for(node_t *head = closed_auctions.auction_list->head; head != NULL; head = head->next){
         a = head->value;
         if(a->creator == curr_user){
-            char buffer[20 + strlen(a->item_name) + strlen(a->highest_bidder->uname)];
+            if(a->highest_bidder != NULL){
+                char buffer[20 + strlen(a->item_name) + strlen(a->highest_bidder->uname)];
 
-            sprintf(buffer, "%d;%s;%s;%ld\n", a->auction_id, a->item_name, a->highest_bidder->uname, a->highest_bid);
-            usrsales_buf = realloc(usrsales_buf, strlen(buffer) + size + 1);
-        
-            strcat(usrsales_buf, buffer);
-            size = strlen(usrsales_buf);
+                sprintf(buffer, "%d;%s;%s;%ld\n", a->auction_id, a->item_name, a->highest_bidder->uname, a->highest_bid);
+                usrsales_buf = realloc(usrsales_buf, strlen(buffer) + size + 1);
+            
+                strcat(usrsales_buf, buffer);
+                size = strlen(usrsales_buf);
+            }
+            else{
+                char buffer[30 + strlen(a->item_name)];
+
+                sprintf(buffer, "%d;%s;None;None\n", a->auction_id, a->item_name);
+                usrsales_buf = realloc(usrsales_buf, strlen(buffer) + size + 1);
+            
+                strcat(usrsales_buf, buffer);
+                size = strlen(usrsales_buf);
+            }
         }
     }
 
