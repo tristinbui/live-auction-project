@@ -5,10 +5,10 @@
 
 // globals
 users_db users;
-auctions_db auctions;
+auctions_db auctions, closed_auctions;
 sbuf_t sbuf;
 // the next auction id
-int AuctionID;
+int AuctionID, listenfd;
 sem_t AuctionID_mutex;
 
 int main(int argc, char **argv) {
@@ -39,7 +39,15 @@ int main(int argc, char **argv) {
         }
     }
     
-    int *connfdp, listenfd, port;
+    char *a_filename = argv[argc-1];
+    FILE *a_file;
+    printf("auction file %s\n", a_filename);
+    if ((a_file = fopen(a_filename, "r")) == NULL){
+        // failed to open file
+        invalid_usage();
+    }
+    
+    int *connfdp, port;
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
 
@@ -47,25 +55,18 @@ int main(int argc, char **argv) {
     port = atoi(argv[argc-2]);
     listenfd = open_listenfd(port);
 
-    // TODO: parse the 'AUCTION FILE'
-
-
-    // TODO: create tick thread
-    pthread_t tid;
-    int *tt = malloc(sizeof(int));
-    *tt = tick_time;
-    pthread_create(&tid, NULL, tick_thread, tt);
-
 
     // TODO: create signal handler for ctrl-c
+    if (signal(SIGINT, sigint_handler) == SIG_ERR)
+        unix_error("signal error\n");
 
+    pthread_t tid;
     // create job threads
     for (int i = 0; i < num_jobthreads; i++){
         pthread_create(&tid, NULL, job_thread, NULL);
     }
 
     sbuf_init(&sbuf, 1000);
-
 
     // next auction ID
     AuctionID = 1;
@@ -74,7 +75,13 @@ int main(int argc, char **argv) {
     sem_init(&(auctions.a_sem), 0, 1);
     sem_init(&(auctions.a_mutex), 0, 1);
     auctions.auction_list = CreateList(compare_auction);
-    
+
+    // closed auction list
+    sem_init(&(closed_auctions.a_sem), 0, 1);
+    sem_init(&(closed_auctions.a_mutex), 0, 1);
+    closed_auctions.auction_list = CreateList(compare_auction);
+    // question: can the auction file be badly formatted?
+    parse_aucfile(a_file);
 
     // create users list
     users.num_users = 0;
@@ -83,6 +90,11 @@ int main(int argc, char **argv) {
     sem_init(&(users.user_sem), 0, 1);
     sem_init(&(users.user_mutex), 0, 1);
     users.read_count = 0;
+
+    // create tick thread
+    int *tt = malloc(sizeof(int));
+    *tt = tick_time;
+    pthread_create(&tid, NULL, tick_thread, tt);
 
     // listen for new users
     while (1) {
@@ -99,14 +111,11 @@ int main(int argc, char **argv) {
             continue;
         }
         
-        // lock for write
         P(&users.user_sem);
-        
         int login_code = do_login(*connfdp, h);
-        // unlock
         V(&users.user_sem);
-
         printf("login result %d\n", login_code);
+
 
         if (login_code == 0) {
             // login successful, create client thread

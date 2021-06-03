@@ -1,5 +1,7 @@
 ./bin/zbid_client user ics53 127.0.0.1 2000
 
-make >/dev/null && ./bin/zbid_server 2000 hi
+make >/dev/null && ./bin/zbid_server 2000 rsrc/auction2.txt
 
 /createauction hi,2,2
+
+tar -cvf fp_8.tar 53finalproj/
