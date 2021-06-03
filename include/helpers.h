@@ -80,12 +80,14 @@ void anleave_h(sbuf_job *job);
 void anbid_h(sbuf_job *job);
 void usrblnc_h(sbuf_job *job);
 void logout_h(sbuf_job *job);
+void usrwins_h(sbuf_job *job);
+void usrsales_h(sbuf_job *job);
 
 void *client_thread();
 void *job_thread();
 void *tick_thread();
 
-int do_login(int connfd, petr_header h);
+int do_login(int connfd, petr_header *h);
 user *find_user(int connfd);
 int user_exists(char* loginbuf, size_t uname_size, user** user_l);
 auction_t *find_auction(List_t *auction_list, int auction_id);

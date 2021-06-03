@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
     listenfd = open_listenfd(port);
 
 
-    // TODO: create signal handler for ctrl-c
+    // create signal handler for ctrl-c
     if (signal(SIGINT, sigint_handler) == SIG_ERR)
         unix_error("signal error\n");
 
@@ -96,6 +96,7 @@ int main(int argc, char **argv) {
     *tt = tick_time;
     pthread_create(&tid, NULL, tick_thread, tt);
 
+    petr_header *h = calloc(1, sizeof(petr_header));
     // listen for new users
     while (1) {
         // accept new connections
@@ -103,8 +104,8 @@ int main(int argc, char **argv) {
         connfdp = malloc(sizeof(int));
         *connfdp = accept(listenfd, (SA *)&clientaddr, &clientlen);
 
-        petr_header h;
-        if (rd_msgheader(*connfdp, &h) || h.msg_type != LOGIN){
+        // petr_header h;
+        if (rd_msgheader(*connfdp, h) || h->msg_type != LOGIN){
             // rd_msgheader returned error or the message is wrong
             free(connfdp);
             close(*connfdp);
@@ -128,6 +129,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    free(h);
     close(listenfd);
     free(users.user_list);
     deleteList(auctions.auction_list);

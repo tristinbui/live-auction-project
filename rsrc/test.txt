@@ -1,0 +1,7 @@
+/c water,2,2
+/a
+
+
+/c half-eaten pizza,2,2
+/a
+/c fitness watch,10,1000

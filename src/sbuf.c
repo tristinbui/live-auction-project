@@ -5,7 +5,8 @@
 /* $begin sbuf_init */
 void sbuf_init(sbuf_t *sp, int n)
 {
-    sp->buf = Calloc(n, sizeof(int)); 
+    // sp->buf = Calloc(n, sizeof(int)); /* original code */
+    sp->buf = Calloc(n, sizeof(void *));
     sp->n = n;                       /* Buffer holds max of n items */
     sp->front = sp->rear = 0;        /* Empty buffer iff front == rear */
     Sem_init(&sp->mutex, 0, 1);      /* Binary semaphore for locking */

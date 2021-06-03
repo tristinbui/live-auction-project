@@ -4,7 +4,8 @@
 void *client_thread(void *client_fdp) {
     int connfd = *(int *)client_fdp;
     free(client_fdp); // on heap, free it
-
+    // pthread_detach thread
+    pthread_detach(pthread_self());
     user *client_user = find_user(connfd);
 
     petr_header h;
@@ -20,8 +21,9 @@ void *client_thread(void *client_fdp) {
         case ANLEAVE:
         case ANBID:;
             // messages that have a message body, read in the client thread
-            char *createbuf = malloc(sizeof(char) * h.msg_len);
+            char *createbuf = calloc(h.msg_len, sizeof(char));
             read(connfd, createbuf, h.msg_len);
+            printf("%s\n", createbuf);
             createbuf[h.msg_len-1] = 0; // null terminate
 
             job = job_helper(connfd, &h);
@@ -38,11 +40,13 @@ void *client_thread(void *client_fdp) {
         
         default:;
         // other messages 
-            job = malloc(sizeof(sbuf_job));
+            job = calloc(1,sizeof(sbuf_job));
             job->connfd = connfd;
             job->msg_type = h.msg_type;
             job->msg_len = h.msg_len;
+            printf("inserting\n");
             sbuf_insert(&sbuf, job);
+            printf("inserted\n");
             break;
         }
     }
@@ -62,9 +66,11 @@ void *client_thread(void *client_fdp) {
 
 
 void *job_thread() {
+    pthread_detach(pthread_self());
     while (1){
+        printf("job thread\n");
         sbuf_job *job = sbuf_remove(&sbuf);
-
+        printf("got job: %x\n", job->msg_type);
         switch(job->msg_type) {
         case ANCREATE:
             // create an auction
@@ -73,6 +79,7 @@ void *job_thread() {
 
         case ANLIST:
         // question: why does it print weird in the client first time?
+            printf("got anlist\n");
             anlist_h(job);
             break;
         
@@ -101,10 +108,12 @@ void *job_thread() {
             
         case USRWINS:
         // list of auctions that user has won
+            usrwins_h(job);
             break;
 
         case USRSALES:
         // list of auctions created/owned by user that have ended 
+            usrsales_h(job);
             break;
 
         case USRBLNC:
@@ -117,13 +126,14 @@ void *job_thread() {
         }
 
         free(job);
-        //TODO: free msg_buf if it exists
+        //TODO: free msg_buf if it exists (remember to change to calloc)
     }
     return NULL;
 }
 
 void *tick_thread(void *tt) {
     int tick_time = *((int*)tt);
+    pthread_detach(pthread_self());
     free(tt);
     while(1){
         if (tick_time == -1)
@@ -147,6 +157,7 @@ void *tick_thread(void *tt) {
                 h.msg_type = ANCLOSED;
                 sbuf_job *j = job_helper(a->auction_id, &h);
                 sbuf_insert(&sbuf, j);
+
             }
         }
         // unlock auctions
@@ -169,6 +180,7 @@ void anclosed_h(sbuf_job *job){
     /* TODO: lock rules
      * lock auctions before users
      * if getting the reader lock on one resource, don't get writer lock on another
+     * Failing tests: ancreate/anlist timing out
     */ 
 
     // P(auction)
@@ -202,15 +214,20 @@ void anclosed_h(sbuf_job *job){
         h->msg_type = ANCLOSED;
         h->msg_len = strlen(msg)+1;
         wr_msg(notified_user->connfd, h, msg);
-        // TODO: the auction should be removed from the user's watchlist
-        
+        // remove the auction from the user's watchlist
+        int auc_index;
+        find_auction_index(notified_user->watching_a, a_id, &auc_index);
+        removeByIndex(notified_user->watching_a, auc_index);
     }
 
+    
     // remove auction
     auction = removeByIndex(auctions.auction_list, auc_index);
     
     // add into the list of closed auctions
+    // TODO: test this
     insertInOrder(closed_auctions.auction_list, auction);
+    deleteList(auction->watching_u);
     
     // assign winner
 
@@ -232,7 +249,7 @@ void ancreate_h(sbuf_job *job) {
     // printf("%s\n", job->msg_buf);
     token = strtok_r(job->msg_buf, "\r\n", &saveptr);
     for(token = strtok_r(job->msg_buf, "\r\n", &saveptr);
-        token != NULL;
+        token != NULL && i < 3;
         token = strtok_r(NULL, "\r\n", &saveptr)) {
         printf("tok: %s\n", token);
         items[i] = token;
@@ -251,20 +268,24 @@ void ancreate_h(sbuf_job *job) {
         duration = -1;
     }
 
-    petr_header h;
+    petr_header *h = calloc(1, sizeof(petr_header));
 
-    if(*item_name == '\0' || duration < 1 || bin_price < 0){
+    if(duration < 1 || *item_name == '\0' || bin_price < 0){
         invalid_ancreate:
-        h.msg_len = 0;
-        h.msg_type = EINVALIDARG;
-        wr_msg(job->connfd, &h, NULL);
+        h->msg_len = 0;
+        h->msg_type = EINVALIDARG;
+        wr_msg(job->connfd, h, NULL);
     }
     else{
-        auction_t *new_auction = malloc(sizeof(auction_t));
+        auction_t *new_auction = calloc(1,sizeof(auction_t));
         char *h_buf = calloc(1, sizeof(char) * 30);
         // Assigning fields
+        // reader lock for users
+        reader_lock(&users.user_mutex, &users.user_sem, &users.read_count);
         user *current_user = find_user(job->connfd);
         new_auction->creator = current_user;
+        reader_unlock(&users.user_mutex, &users.user_sem, &users.read_count);
+
         char* new_item_name = malloc(sizeof(char) * (strlen(item_name)+1));
         strcpy(new_item_name, item_name);
         new_auction->item_name = new_item_name;
@@ -288,13 +309,14 @@ void ancreate_h(sbuf_job *job) {
         insertRear(auctions.auction_list, new_auction);
         V(&auctions.a_sem);
 
-        h.msg_len = strlen(h_buf) + 1;
-        h.msg_type = ANCREATE;
-        wr_msg(job->connfd, &h, h_buf);
+        h->msg_len = strlen(h_buf) + 1;
+        h->msg_type = ANCREATE;
+        wr_msg(job->connfd, h, h_buf);
         free(h_buf);
     }
     
     free(job->msg_buf);
+    free(h);
     // auction_t *a = removeFront(auctions.auction_list);
     // printf("%s %d %d %d\n", a->item_name, a->duration, a->auction_id, a->bin_price);
 
@@ -360,6 +382,7 @@ void userlist_h(int connfd) {
     reader_unlock(&users.user_mutex, &users.user_sem, &users.read_count);
 
     // Question: why is this giving valgrind error?
+    // printf("%d, %d, %d\n", (int) sizeof(petr_header), (int) sizeof(uint32_t), (int) sizeof(uint8_t));
     // petr_header *h = malloc(sizeof(petr_header));
     petr_header *h = calloc(1, sizeof(petr_header));
     h->msg_type = USRLIST;
@@ -376,21 +399,100 @@ void userlist_h(int connfd) {
 /* Return user's current balance, msg body is <balance>
  *
  */
+void usrwins_h(sbuf_job *job){
+    reader_lock(&closed_auctions.a_mutex, &closed_auctions.a_sem, &closed_auctions.read_count);
+    reader_lock(&users.user_mutex, &users.user_sem, &users.read_count);
+    user *curr_user = find_user(job->connfd);
+    auction_t *a;
+    char *usrwins_buf = calloc(1, sizeof(char));
+    size_t size = 0;
+    
+    for(node_t *head = closed_auctions.auction_list->head; head != NULL; head = head->next){
+        a = head->value;
+
+        if(a->highest_bidder == curr_user){
+            char buffer[20 + strlen(a->item_name)];
+            
+            sprintf(buffer, "%d;%s;%ld\n", a->auction_id, a->item_name, a->highest_bid);
+            usrwins_buf = realloc(usrwins_buf, strlen(buffer) + size + 1);
+        
+            strcat(usrwins_buf, buffer);
+            size = strlen(usrwins_buf);
+        }
+    }
+
+    reader_unlock(&closed_auctions.a_mutex, &closed_auctions.a_sem, &closed_auctions.read_count);
+    reader_unlock(&users.user_mutex, &users.user_sem, &users.read_count);
+
+    petr_header *h = calloc(1, sizeof(petr_header));
+    h->msg_type = USRWINS;
+    h->msg_len = size == 0 ? 0 : size+1;
+    usrwins_buf = size == 0 ? NULL : usrwins_buf;
+    printf("sending: %s", usrwins_buf);
+    wr_msg(job->connfd, h, usrwins_buf);
+
+    free(h);
+    free(usrwins_buf);
+}
+
+
+/* Sends a list of auctions that the user has created/owned and have
+ * concluded.
+ *
+ */
+void usrsales_h(sbuf_job *job){
+    reader_lock(&closed_auctions.a_mutex, &closed_auctions.a_sem, &closed_auctions.read_count);
+    reader_lock(&users.user_mutex, &users.user_sem, &users.read_count);
+    user *curr_user = find_user(job->connfd);
+    auction_t *a;
+    char *usrsales_buf = calloc(1, sizeof(char));
+    size_t size = 0;
+    
+    for(node_t *head = closed_auctions.auction_list->head; head != NULL; head = head->next){
+        a = head->value;
+        if(a->creator == curr_user){
+            char buffer[20 + strlen(a->item_name) + strlen(a->highest_bidder->uname)];
+
+            sprintf(buffer, "%d;%s;%s;%ld\n", a->auction_id, a->item_name, a->highest_bidder->uname, a->highest_bid);
+            usrsales_buf = realloc(usrsales_buf, strlen(buffer) + size + 1);
+        
+            strcat(usrsales_buf, buffer);
+            size = strlen(usrsales_buf);
+        }
+    }
+
+    reader_unlock(&closed_auctions.a_mutex, &closed_auctions.a_sem, &closed_auctions.read_count);
+    reader_unlock(&users.user_mutex, &users.user_sem, &users.read_count);
+
+    petr_header *h = calloc(1, sizeof(petr_header));
+    h->msg_type = USRSALES;
+    h->msg_len = size == 0 ? 0 : size+1;
+    usrsales_buf = size == 0 ? NULL : usrsales_buf;
+    printf("sending: %s", usrsales_buf);
+    wr_msg(job->connfd, h, usrsales_buf);
+
+    free(h);
+    free(usrsales_buf);
+}
+
+/* Return user's current balance, msg body is <balance>
+ */
 void usrblnc_h(sbuf_job *job) {
     // lock users for reading
     reader_lock(&users.user_mutex, &users.user_sem, &users.read_count);
 
     user *u = find_user(job->connfd);
-    petr_header h;
     char msgbuf[20];
     sprintf(msgbuf, "%ld", u->balance);
 
-    h.msg_len = strlen(msgbuf)+1;
-    h.msg_type = USRBLNC;
-    wr_msg(job->connfd, &h, msgbuf);
+    petr_header *h = calloc(1, sizeof(petr_header));
+    h->msg_len = strlen(msgbuf)+1;
+    h->msg_type = USRBLNC;
+    wr_msg(job->connfd, h, msgbuf);
 
     // unlocks users for reading
     reader_unlock(&users.user_mutex, &users.user_sem, &users.read_count);
+    free(h);
 }
 
 /* Helper function for watching a currently running auction.
@@ -447,7 +549,7 @@ void anleave_h(sbuf_job *job) {
     auction_t *a;
     int i = 0;
     user *user = find_user(job->connfd);
-    petr_header h;
+    petr_header *h = calloc(1, sizeof(petr_header));
     
     if(find_auction(auctions.auction_list, id) != NULL){
         // remove auction from user's watchlist
@@ -471,18 +573,18 @@ void anleave_h(sbuf_job *job) {
             }
             i++;
         }
-        h.msg_type = OK;
+        h->msg_type = OK;
     }
     else { 
-        h.msg_type = EANNOTFOUND;
+        h->msg_type = EANNOTFOUND;
     }
     // unlock
     V(&auctions.a_sem);
     V(&users.user_sem);
 
-    h.msg_len = 0;
-    wr_msg(job->connfd, &h, NULL);
-
+    h->msg_len = 0;
+    wr_msg(job->connfd, h, NULL);
+    free(h);
     printf("in anleave\n");
     return;
 }
@@ -497,7 +599,7 @@ void anleave_h(sbuf_job *job) {
  * <auction_id>\r\n<item_name\r\n<from_username>\r\n<bid>
  */
 void anbid_h(sbuf_job *job) {
-    petr_header h;
+    petr_header *h = calloc(1, sizeof(petr_header));
     // parse msg body
     //11\r\n200\0
     //11\0\n200\0
@@ -518,26 +620,26 @@ void anbid_h(sbuf_job *job) {
             // user is watching the auction
             if(bid <= a->highest_bid){
                 // bid too low
-                h.msg_type = EBIDLOW;
+                h->msg_type = EBIDLOW;
             } else {
                 // successful bid, update highest bidder
                 a->highest_bidder = curr_user;
                 a->highest_bid = bid; 
-                h.msg_type = OK;
+                h->msg_type = OK;
             }
         } else {
             // user is not watching the auction or is the creator of the auction
-            h.msg_type = EANDENIED;
+            h->msg_type = EANDENIED;
         }
     }
     else{
-        h.msg_type = EANNOTFOUND;
+        h->msg_type = EANNOTFOUND;
     }
     // send the first message
-    h.msg_len = 0;
-    wr_msg(job->connfd, &h, NULL);
+    h->msg_len = 0;
+    wr_msg(job->connfd, h, NULL);
 
-    if (h.msg_type == OK){
+    if (h->msg_type == OK){
         // send anupdate
         // format <auction_id>\r\n<item_name\r\n<from_username>\r\n<bid>
         size_t msgbuf_len = strlen(a->item_name) + strlen(a->highest_bidder->uname) + 20;
@@ -546,17 +648,17 @@ void anbid_h(sbuf_job *job) {
 
         for(node_t *head = a->watching_u->head; head != NULL; head = head->next){
             user *u = head->value;
-            h.msg_type = ANUPDATE;
-            h.msg_len = strlen(update_msgbuf)+1;
+            h->msg_type = ANUPDATE;
+            h->msg_len = strlen(update_msgbuf)+1;
 
-            wr_msg(u->connfd, &h, update_msgbuf);
+            wr_msg(u->connfd, h, update_msgbuf);
         }
         free(update_msgbuf);
     }
 
     V(&auctions.a_sem);
     V(&users.user_sem);
-    
+    free(h);
 }
 
 
@@ -717,10 +819,10 @@ void sigint_handler(int sig) {
  * @return 0 if the user was successfully logged in, and -1 if 
  * the user did not get logged in
  */
-int do_login(int connfd, petr_header h){
-    char *loginbuf = malloc(sizeof(char) * h.msg_len);
-    read(connfd, loginbuf, h.msg_len);
-    loginbuf[h.msg_len-1] = 0; // null terminate
+int do_login(int connfd, petr_header *h){
+    char *loginbuf = malloc(sizeof(char) * h->msg_len);
+    read(connfd, loginbuf, h->msg_len);
+    loginbuf[h->msg_len-1] = 0; // null terminate
 
     char *passwd = strstr(loginbuf, "\r\n") + 2;
     if (passwd != NULL) {
@@ -732,7 +834,7 @@ int do_login(int connfd, petr_header h){
         int exists_res = user_exists(loginbuf, uname_size, users.user_list);
         if(exists_res == 0){
             // creates new user (on heap)
-            user* new_user = malloc(sizeof(user));
+            user* new_user = calloc(1, sizeof(user));
             new_user->password = calloc(1, sizeof(char) * strlen(passwd) + 1);
             new_user->uname = calloc(1, sizeof(char) * uname_size + 1);
 
@@ -755,9 +857,9 @@ int do_login(int connfd, petr_header h){
                 if(strncmp(users.user_list[i]->uname, loginbuf, uname_size) == 0){
                     if(users.user_list[i]->is_loggedin == 1){
                         // user is already logged in
-                        h.msg_type = EUSRLGDIN;
-                        h.msg_len = 0;
-                        wr_msg(connfd, &h, NULL);
+                        h->msg_type = EUSRLGDIN;
+                        h->msg_len = 0;
+                        wr_msg(connfd, h, NULL);
                         close(connfd);
                         exists_res = -1;
                     }
@@ -771,17 +873,17 @@ int do_login(int connfd, petr_header h){
         }    
         else if (exists_res == -1) {
             // invalid password
-            h.msg_type = EWRNGPWD;
-            h.msg_len = 0;
-            wr_msg(connfd, &h, NULL);
+            h->msg_type = EWRNGPWD;
+            h->msg_len = 0;
+            wr_msg(connfd, h, NULL);
             close(connfd);
         }
         
         if (exists_res >= 0){
             // successful login
-            h.msg_type = OK;
-            h.msg_len = 0;
-            wr_msg(connfd, &h, NULL);
+            h->msg_type = OK;
+            h->msg_len = 0;
+            wr_msg(connfd, h, NULL);
             free(loginbuf);
             return 0;
         }
@@ -871,7 +973,7 @@ int compare_user(void *l_auction, void *r_auction){
  * @return pointer to an sbuf_job on the heap, with msg_type, msg_len, and connfd set.
  */
 sbuf_job *job_helper(int connfd, petr_header *h) {
-    sbuf_job *job = malloc(sizeof(sbuf_job));
+    sbuf_job *job = calloc(1,sizeof(sbuf_job));
     job->connfd = connfd;
     job->msg_type = h->msg_type;
     job->msg_len = h->msg_len;
