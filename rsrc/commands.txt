@@ -1,4 +1,4 @@
-./bin/zbid_client user ics53 127.0.0.1 2000
+./bin/zbid_client myuser ics53 127.0.0.1 2000
 
 make >/dev/null && ./bin/zbid_server 2000 rsrc/auction2.txt
 make >/dev/null && val ./bin/zbid_server 2000 rsrc/auction2.txt
@@ -8,3 +8,9 @@ make >/dev/null && val ./bin/zbid_server 2000 rsrc/auction2.txt
 tar -cvf fp_8.tar 53finalproj/
 
 sudo tcpdump port 2000  -X -i lo
+
+fix:
+./test.sh
+login with myuser, ctrl-c, try to login again
+
+tests:

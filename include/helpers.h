@@ -73,7 +73,7 @@ void invalid_usage();
 
 void userlist_h(int connfd);
 void ancreate_h(sbuf_job *job);
-void anclosed_h(sbuf_job *job);
+void anclosed_h(sbuf_job *job, int dont_lock);
 void anlist_h(sbuf_job *job);
 void anwatch_h(sbuf_job *job);
 void anleave_h(sbuf_job *job);

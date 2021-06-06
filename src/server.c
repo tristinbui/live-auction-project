@@ -41,7 +41,6 @@ int main(int argc, char **argv) {
     
     char *a_filename = argv[argc-1];
     FILE *a_file;
-    printf("auction file %s\n", a_filename);
     if ((a_file = fopen(a_filename, "r")) == NULL){
         // failed to open file
         invalid_usage();
@@ -60,13 +59,15 @@ int main(int argc, char **argv) {
     if (signal(SIGINT, sigint_handler) == SIG_ERR)
         unix_error("signal error\n");
 
+    // create sbuf before spawning job threads
+    sbuf_init(&sbuf, 1000);
+
     pthread_t tid;
     // create job threads
     for (int i = 0; i < num_jobthreads; i++){
         pthread_create(&tid, NULL, job_thread, NULL);
     }
 
-    sbuf_init(&sbuf, 1000);
 
     // next auction ID
     AuctionID = 1;
@@ -103,7 +104,6 @@ int main(int argc, char **argv) {
         clientlen = sizeof(clientaddr);
         connfdp = malloc(sizeof(int));
         *connfdp = accept(listenfd, (SA *)&clientaddr, &clientlen);
-
         // petr_header h;
         if (rd_msgheader(*connfdp, h) || h->msg_type != LOGIN){
             // rd_msgheader returned error or the message is wrong
@@ -115,7 +115,6 @@ int main(int argc, char **argv) {
         P(&users.user_sem);
         int login_code = do_login(*connfdp, h);
         V(&users.user_sem);
-        printf("login result %d\n", login_code);
 
 
         if (login_code == 0) {
