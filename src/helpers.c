@@ -163,6 +163,7 @@ void *tick_thread(void *tt) {
 /* Auction is finished
  * <auction_id>\r\n<win_name>\r\n<win_price>
  * if no winner: <auction_id>\r\n<\r\n
+ * @param job SPECIAL: connfd needs to be the auction id, since this is triggered by the server
  * @param dont_lock if you already have a lock on auctions and users, send 1. If caller 
  * does not have lock, send 0
  */
@@ -624,7 +625,7 @@ void anbid_h(sbuf_job *job) {
             
             else {
                 // successful bid, update highest bidder
-                if(bid > a->bin_price)
+                if(bid >= a->bin_price && a->bin_price > 0) // bin_price of 0 indicates no max price 
                     a->highest_bid = a->bin_price;
                 else
                     a->highest_bid = bid;
@@ -661,7 +662,8 @@ void anbid_h(sbuf_job *job) {
         
         if (a->highest_bid == a->bin_price){
             // immediately close the auction, send anclosed
-
+            // write the auction_id to the job for anclosed
+            job->connfd = auc_id;
             anclosed_h(job, 1);
         }
 
