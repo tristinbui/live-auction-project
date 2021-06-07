@@ -74,7 +74,6 @@ void *job_thread() {
             break;
 
         case ANLIST:
-        // question: why does it print weird in the client first time?
             anlist_h(job);
             break;
         
@@ -132,7 +131,7 @@ void *tick_thread(void *tt) {
     free(tt);
     while(1){
         if (tick_time == -1)
-            getchar(); // question: is using getchar ok?
+            while (getchar() != '\n'); // wait for newline
         else
             sleep(tick_time);
         
@@ -818,7 +817,6 @@ void logout_h(sbuf_job *job) {
     free(h);
 }
 
-// question: does the signal handler need to clean up memory?
 void sigint_handler(int sig) {
     close(listenfd);
     exit(0);

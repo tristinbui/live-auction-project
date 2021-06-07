@@ -31,8 +31,9 @@ int main(int argc, char **argv) {
             if (*endptr != 0 || num_jobthreads <= 0) invalid_usage();
             break;
         case 't':
-            tick_time = strtol(optarg, &endptr, 10);
-            if (*endptr != 0) invalid_usage();
+            // question: can tick time be 0?
+            tick_time = strtol(optarg, &endptr, 10); 
+            if (*endptr != 0 || tick_time <= 0) invalid_usage(); 
             break;
         default:
             invalid_usage();
@@ -81,7 +82,8 @@ int main(int argc, char **argv) {
     sem_init(&(closed_auctions.a_sem), 0, 1);
     sem_init(&(closed_auctions.a_mutex), 0, 1);
     closed_auctions.auction_list = CreateList(compare_auction);
-    // question: can the auction file be badly formatted?
+    
+    // parse the auction file
     parse_aucfile(a_file);
 
     // create users list
@@ -127,7 +129,7 @@ int main(int argc, char **argv) {
             free(connfdp);
         }
     }
-
+    // TODO: we never get here? lol
     free(h);
     close(listenfd);
     free(users.user_list);
